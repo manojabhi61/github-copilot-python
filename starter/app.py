@@ -18,6 +18,30 @@ CURRENT = {
 }
 
 
+def is_valid_board(board):
+    if not isinstance(board, list):
+        return False
+
+    if len(board) != sudoku_logic.SIZE:
+        return False
+
+    for row in board:
+        if not isinstance(row, list):
+            return False
+
+        if len(row) != sudoku_logic.SIZE:
+            return False
+
+        for cell in row:
+            if isinstance(cell, bool) or not isinstance(cell, int):
+                return False
+
+            if cell < 0 or cell > sudoku_logic.SIZE:
+                return False
+
+    return True
+
+
 def resolve_clues():
     difficulty = request.args.get('difficulty', '').strip().lower()
     if difficulty in DIFFICULTY_CLUES:
@@ -48,10 +72,13 @@ def new_game():
 
 @app.route('/check', methods=['POST'])
 def check_solution():
-    data = request.json
-    board = data.get('board')
+    data = request.get_json(silent=True)
+    board = data.get('board') if isinstance(data, dict) else None
     solution = CURRENT.get('solution')
     puzzle = CURRENT.get('puzzle')
+
+    if not is_valid_board(board):
+        return jsonify({'error': 'A 9x9 board is required'}), 400
 
     if solution is None or puzzle is None:
         return jsonify({'error': 'No game in progress'}), 400
@@ -76,12 +103,28 @@ def check_solution():
 def give_hint():
     puzzle = CURRENT.get('puzzle')
     solution = CURRENT.get('solution')
+
     if puzzle is None or solution is None:
         return jsonify({'error': 'No game in progress'}), 400
 
+    if request.is_json:
+        data = request.get_json(silent=True)
+        if data is None:
+            return jsonify({'error': 'A 9x9 board is required'}), 400
+
+        board = data.get('board') if isinstance(data, dict) else None
+    else:
+        board = None
+
+    if board is None:
+        board = puzzle
+
+    if not is_valid_board(board):
+        return jsonify({'error': 'A 9x9 board is required'}), 400
+
     for row in range(sudoku_logic.SIZE):
         for col in range(sudoku_logic.SIZE):
-            if puzzle[row][col] == sudoku_logic.EMPTY:
+            if board[row][col] == sudoku_logic.EMPTY:
                 puzzle[row][col] = solution[row][col]
                 return jsonify({
                     'row': row,

@@ -218,10 +218,11 @@ function createBoardElement() {
       input.dataset.row = i;
       input.dataset.col = j;
       input.dataset.boxParity = boxParity;
-      input.addEventListener('input', (e) => {
+      input.addEventListener('input', async (e) => {
         const val = e.target.value.replace(/[^1-9]/g, '');
         e.target.value = val;
-        applyLiveValidation();
+        await checkSolution({silent: true});
+        maybeAutoCompletePuzzle();
       });
       rowDiv.appendChild(input);
     }
@@ -229,66 +230,24 @@ function createBoardElement() {
   }
 }
 
-function getConflictKeys() {
-  const boardDiv = document.getElementById('sudoku-board');
-  const inputs = boardDiv.getElementsByTagName('input');
-  const boardInputs = [];
-
-  for (let index = 0; index < inputs.length; index++) {
-    const input = inputs[index];
-    const value = input.value ? parseInt(input.value, 10) : null;
-    if (value === null) {
-      continue;
-    }
-
-    boardInputs.push({
-      input,
-      row: Number(input.dataset.row),
-      col: Number(input.dataset.col),
-      value,
-    });
-  }
-
-  const conflictKeys = new Set();
-
-  for (let firstIndex = 0; firstIndex < boardInputs.length; firstIndex++) {
-    const first = boardInputs[firstIndex];
-
-    for (let secondIndex = firstIndex + 1; secondIndex < boardInputs.length; secondIndex++) {
-      const second = boardInputs[secondIndex];
-
-      if (first.value !== second.value) {
-        continue;
-      }
-
-      const sameRow = first.row === second.row;
-      const sameCol = first.col === second.col;
-      const sameBox = Math.floor(first.row / 3) === Math.floor(second.row / 3)
-        && Math.floor(first.col / 3) === Math.floor(second.col / 3);
-
-      if (!sameRow && !sameCol && !sameBox) {
-        continue;
-      }
-
-      conflictKeys.add(`${first.row}-${first.col}`);
-      conflictKeys.add(`${second.row}-${second.col}`);
-    }
-  }
-
-  return conflictKeys;
+function isHighlightableCell(input) {
+  const rawValue = input.value;
+  return !input.disabled
+    && rawValue !== ''
+    && rawValue !== null
+    && rawValue !== undefined
+    && rawValue !== 0
+    && rawValue !== '0';
 }
 
-function applyLiveValidation() {
-  const boardDiv = document.getElementById('sudoku-board');
-  const inputs = boardDiv.getElementsByTagName('input');
-  const conflictKeys = getConflictKeys();
+function applyBoardHighlightState(inputs, incorrect, correct) {
+  for (let idx = 0; idx < inputs.length; idx++) {
+    const input = inputs[idx];
+    input.classList.remove('incorrect', 'correct', 'live-invalid');
 
-  for (let index = 0; index < inputs.length; index++) {
-    const input = inputs[index];
-    const row = Number(input.dataset.row);
-    const col = Number(input.dataset.col);
-    const key = `${row}-${col}`;
-    const existingClasses = Array.from(input.classList).filter((className) => className !== 'live-invalid');
+    const existingClasses = Array.from(input.classList).filter((className) => {
+      return className !== 'incorrect' && className !== 'correct' && className !== 'live-invalid';
+    });
 
     input.className = `sudoku-cell ${input.dataset.boxParity}`;
 
@@ -300,8 +259,14 @@ function applyLiveValidation() {
       input.classList.add('hinted');
     }
 
-    if (conflictKeys.has(key)) {
-      input.classList.add('live-invalid');
+    if (!isHighlightableCell(input)) {
+      continue;
+    }
+
+    if (incorrect.has(idx)) {
+      input.classList.add('incorrect');
+    } else if (correct.has(idx)) {
+      input.classList.add('correct');
     }
   }
 }
@@ -329,6 +294,49 @@ function renderPuzzle(puz) {
   }
 }
 
+function getBoard() {
+  const boardDiv = document.getElementById('sudoku-board');
+  const inputs = boardDiv.getElementsByTagName('input');
+  const board = [];
+
+  for (let i = 0; i < SIZE; i++) {
+    board[i] = [];
+    for (let j = 0; j < SIZE; j++) {
+      const idx = i * SIZE + j;
+      const val = inputs[idx].value;
+      board[i][j] = val ? parseInt(val, 10) : 0;
+    }
+  }
+
+  return board;
+}
+
+function hasEmptyEditableCells() {
+  const boardDiv = document.getElementById('sudoku-board');
+  const inputs = boardDiv.getElementsByTagName('input');
+
+  for (let index = 0; index < inputs.length; index++) {
+    const input = inputs[index];
+    if (input.disabled) {
+      continue;
+    }
+
+    if (!input.value) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function maybeAutoCompletePuzzle() {
+  if (hasCompletedGame || hasEmptyEditableCells()) {
+    return;
+  }
+
+  await checkSolution({silent: true});
+}
+
 function applyHint(row, col, value) {
   const boardDiv = document.getElementById('sudoku-board');
   const inputs = boardDiv.getElementsByTagName('input');
@@ -343,6 +351,7 @@ function applyHint(row, col, value) {
   inp.disabled = true;
   inp.className = `sudoku-cell ${inp.dataset.boxParity} hinted`;
   puzzle[row][col] = value;
+  maybeAutoCompletePuzzle();
 }
 
 async function newGame() {
@@ -356,18 +365,11 @@ async function newGame() {
   document.getElementById('message').innerText = '';
 }
 
-async function checkSolution() {
+async function checkSolution(options = {}) {
+  const {silent = false} = options;
   const boardDiv = document.getElementById('sudoku-board');
   const inputs = boardDiv.getElementsByTagName('input');
-  const board = [];
-  for (let i = 0; i < SIZE; i++) {
-    board[i] = [];
-    for (let j = 0; j < SIZE; j++) {
-      const idx = i * SIZE + j;
-      const val = inputs[idx].value;
-      board[i][j] = val ? parseInt(val, 10) : 0;
-    }
-  }
+  const board = getBoard();
   const res = await fetch('/check', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -377,37 +379,40 @@ async function checkSolution() {
   const msg = document.getElementById('message');
   if (data.error) {
     msg.style.color = '#d32f2f';
-    msg.innerText = data.error;
+    if (!silent) {
+      msg.innerText = data.error;
+    }
     return;
   }
 
   const incorrect = new Set(data.incorrect.map(x => x[0] * SIZE + x[1]));
   const correct = new Set(data.correct.map(x => x[0] * SIZE + x[1]));
 
-  for (let idx = 0; idx < inputs.length; idx++) {
-    const inp = inputs[idx];
-    if (inp.disabled) continue;
-    inp.className = `sudoku-cell ${inp.dataset.boxParity}`;
-    if (incorrect.has(idx)) {
-      inp.className = `sudoku-cell ${inp.dataset.boxParity} incorrect`;
-    } else if (correct.has(idx)) {
-      inp.className = `sudoku-cell ${inp.dataset.boxParity} correct`;
-    }
-  }
+  applyBoardHighlightState(inputs, incorrect, correct);
 
   if (incorrect.size === 0) {
     stopTimer();
     recordLeaderboardEntry();
+    for (let idx = 0; idx < inputs.length; idx++) {
+      const inp = inputs[idx];
+      inp.disabled = true;
+    }
     msg.style.color = '#388e3c';
-    msg.innerText = `Congratulations! You solved it in ${formatTimerDisplay()}.`;
-  } else {
+    msg.innerText = '🎉 Congratulations! You solved the puzzle!';
+  } else if (!silent) {
     msg.style.color = '#d32f2f';
     msg.innerText = 'Some cells are incorrect.';
   }
 }
 
 async function getHint() {
-  const res = await fetch('/hint', {method: 'POST'});
+  const board = getBoard();
+
+  const res = await fetch('/hint', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({board})
+  });
   const data = await res.json();
   if (data.error) {
     const msg = document.getElementById('message');

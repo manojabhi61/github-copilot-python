@@ -1,7 +1,7 @@
 import pytest
 
 import sudoku_logic
-from app import app, CURRENT
+from app import app, CURRENT, is_valid_board
 
 
 @pytest.fixture()
@@ -51,6 +51,79 @@ def test_existing_application_routes_still_work_without_logic_changes(client):
     assert result["incorrect"] == []
     assert "correct" in result
     assert isinstance(result["correct"], list)
+
+
+def test_check_route_returns_400_for_missing_or_malformed_board(client):
+    response = client.post("/check", data="not-json", content_type="application/json")
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "A 9x9 board is required"}
+
+    missing_board_response = client.post("/check", json={})
+    assert missing_board_response.status_code == 400
+    assert missing_board_response.get_json() == {"error": "A 9x9 board is required"}
+
+
+def test_hint_route_returns_400_for_missing_json_body(client):
+    client.get("/new?difficulty=easy")
+
+    response = client.post("/hint", data="not-json", content_type="application/json")
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "A 9x9 board is required"}
+
+
+def test_hint_route_returns_400_for_invalid_board_shape(client):
+    client.get("/new?difficulty=easy")
+    valid_board = sudoku_logic.deep_copy(CURRENT["solution"])
+    assert is_valid_board(valid_board)
+
+    invalid_board = valid_board[:8]
+    response = client.post("/hint", json={"board": invalid_board})
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "A 9x9 board is required"}
+    assert not is_valid_board(invalid_board)
+
+
+def test_hint_route_returns_400_for_invalid_board_values(client):
+    client.get("/new?difficulty=easy")
+    valid_board = sudoku_logic.deep_copy(CURRENT["solution"])
+    assert is_valid_board(valid_board)
+
+    invalid_board = sudoku_logic.deep_copy(valid_board)
+    invalid_board[0][0] = 10
+    response = client.post("/hint", json={"board": invalid_board})
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "A 9x9 board is required"}
+    assert not is_valid_board(invalid_board)
+
+
+def test_check_route_returns_400_for_invalid_board_dimensions(client):
+    client.get("/new?difficulty=easy")
+    valid_board = sudoku_logic.deep_copy(CURRENT["solution"])
+    assert is_valid_board(valid_board)
+
+    invalid_board = valid_board[:8]
+    response = client.post("/check", json={"board": invalid_board})
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "A 9x9 board is required"}
+    assert not is_valid_board(invalid_board)
+
+
+def test_check_route_returns_400_for_invalid_cell_values(client):
+    client.get("/new?difficulty=easy")
+    valid_board = sudoku_logic.deep_copy(CURRENT["solution"])
+    assert is_valid_board(valid_board)
+
+    invalid_board = sudoku_logic.deep_copy(valid_board)
+    invalid_board[0][0] = -1
+    response = client.post("/check", json={"board": invalid_board})
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "A 9x9 board is required"}
+    assert not is_valid_board(invalid_board)
 
 
 def test_new_endpoint_accepts_difficulty_parameter(client):
@@ -126,6 +199,26 @@ def test_hint_route_returns_error_when_no_empty_cells_available(client):
     hint_response = client.post("/hint")
     assert hint_response.status_code == 400
     assert hint_response.get_json()["error"] == "No empty cells available"
+
+
+def test_hint_route_uses_the_player_board_and_does_not_overwrite_existing_value(client):
+    client.get("/new?difficulty=easy")
+
+    player_board = sudoku_logic.deep_copy(CURRENT["puzzle"])
+    first_empty = next(
+        (row, col)
+        for row in range(sudoku_logic.SIZE)
+        for col in range(sudoku_logic.SIZE)
+        if player_board[row][col] == sudoku_logic.EMPTY
+    )
+    player_board[first_empty[0]][first_empty[1]] = 5
+
+    hint_response = client.post("/hint", json={"board": player_board})
+    assert hint_response.status_code == 200
+
+    data = hint_response.get_json()
+    assert (data["row"], data["col"]) != first_empty
+    assert player_board[first_empty[0]][first_empty[1]] == 5
 
 
 def test_check_route_reports_incorrect_and_correct_user_cells(client):
