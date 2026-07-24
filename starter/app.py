@@ -51,14 +51,46 @@ def check_solution():
     data = request.json
     board = data.get('board')
     solution = CURRENT.get('solution')
-    if solution is None:
+    puzzle = CURRENT.get('puzzle')
+
+    if solution is None or puzzle is None:
         return jsonify({'error': 'No game in progress'}), 400
+
     incorrect = []
+    correct = []
+
     for i in range(sudoku_logic.SIZE):
         for j in range(sudoku_logic.SIZE):
-            if board[i][j] != solution[i][j]:
+            if puzzle[i][j] != sudoku_logic.EMPTY:
+                continue
+
+            if board[i][j] == solution[i][j]:
+                correct.append([i, j])
+            else:
                 incorrect.append([i, j])
-    return jsonify({'incorrect': incorrect})
+
+    return jsonify({'incorrect': incorrect, 'correct': correct})
+
+
+@app.route('/hint', methods=['POST'])
+def give_hint():
+    puzzle = CURRENT.get('puzzle')
+    solution = CURRENT.get('solution')
+    if puzzle is None or solution is None:
+        return jsonify({'error': 'No game in progress'}), 400
+
+    for row in range(sudoku_logic.SIZE):
+        for col in range(sudoku_logic.SIZE):
+            if puzzle[row][col] == sudoku_logic.EMPTY:
+                puzzle[row][col] = solution[row][col]
+                return jsonify({
+                    'row': row,
+                    'col': col,
+                    'value': solution[row][col]
+                })
+
+    return jsonify({'error': 'No empty cells available'}), 400
+
 
 if __name__ == '__main__':
     app.run(debug=True)

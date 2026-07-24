@@ -1,5 +1,6 @@
 import pytest
 
+import sudoku_logic
 from app import app, CURRENT
 
 
@@ -19,6 +20,14 @@ def test_home_page_loads_successfully(client):
     response = client.get("/")
     assert response.status_code == 200
     assert b"<title>Sudoku Game</title>" in response.data
+    assert b'"player-name"' in response.data
+    assert b"Top 10 Leaderboard" in response.data
+    assert b'id="leaderboard-table"' in response.data
+    assert b"<th>Rank</th>" in response.data
+    assert b"<th>Name</th>" in response.data
+    assert b"<th>Time</th>" in response.data
+    assert b"<th>Level</th>" in response.data
+    assert b"<th>Hints</th>" in response.data
 
 
 def test_existing_application_routes_still_work_without_logic_changes(client):
@@ -34,11 +43,14 @@ def test_existing_application_routes_still_work_without_logic_changes(client):
     assert CURRENT["puzzle"] is not None
     assert CURRENT["solution"] is not None
 
-    assert CURRENT["solution"] is not None
     payload = {"board": CURRENT["solution"]}
     check_response = client.post("/check", json=payload)
     assert check_response.status_code == 200
-    assert check_response.get_json() == {"incorrect": []}
+
+    result = check_response.get_json()
+    assert result["incorrect"] == []
+    assert "correct" in result
+    assert isinstance(result["correct"], list)
 
 
 def test_new_endpoint_accepts_difficulty_parameter(client):
@@ -48,3 +60,91 @@ def test_new_endpoint_accepts_difficulty_parameter(client):
     assert "puzzle" in data
     assert len(data["puzzle"]) == 9
     assert all(len(row) == 9 for row in data["puzzle"])
+
+
+def test_difficulty_parameter_changes_prefilled_cell_counts(client):
+    easy_response = client.get("/new?difficulty=easy")
+    medium_response = client.get("/new?difficulty=medium")
+    hard_response = client.get("/new?difficulty=hard")
+
+    easy_puzzle = easy_response.get_json()["puzzle"]
+    medium_puzzle = medium_response.get_json()["puzzle"]
+    hard_puzzle = hard_response.get_json()["puzzle"]
+
+    easy_clues = sum(cell != 0 for row in easy_puzzle for cell in row)
+    medium_clues = sum(cell != 0 for row in medium_puzzle for cell in row)
+    hard_clues = sum(cell != 0 for row in hard_puzzle for cell in row)
+
+    assert easy_clues > medium_clues > hard_clues
+
+
+def test_generated_puzzle_has_exactly_one_solution():
+    puzzle, _ = sudoku_logic.generate_puzzle(35)
+    solution_count = sudoku_logic.count_solutions(
+        sudoku_logic.deep_copy(puzzle),
+        limit=2,
+    )
+
+    assert solution_count == 1
+
+
+def test_hint_route_fills_exactly_one_empty_cell(client):
+    response = client.get("/new?difficulty=easy")
+    assert response.status_code == 200
+
+    before_hint = sudoku_logic.deep_copy(CURRENT["puzzle"])
+    empty_cells_before = sum(
+        cell == sudoku_logic.EMPTY for row in before_hint for cell in row
+    )
+
+    hint_response = client.post("/hint")
+    assert hint_response.status_code == 200
+
+    data = hint_response.get_json()
+    assert set(data) == {"row", "col", "value"}
+
+    row = data["row"]
+    col = data["col"]
+    value = data["value"]
+
+    assert CURRENT["puzzle"][row][col] == value
+    assert CURRENT["solution"][row][col] == value
+
+    empty_cells_after = sum(
+        cell == sudoku_logic.EMPTY for row in CURRENT["puzzle"] for cell in row
+    )
+    assert empty_cells_after == empty_cells_before - 1
+
+
+def test_hint_route_returns_error_when_no_empty_cells_available(client):
+    client.get("/new?difficulty=easy")
+
+    for row in range(sudoku_logic.SIZE):
+        for col in range(sudoku_logic.SIZE):
+            CURRENT["puzzle"][row][col] = CURRENT["solution"][row][col]
+
+    hint_response = client.post("/hint")
+    assert hint_response.status_code == 400
+    assert hint_response.get_json()["error"] == "No empty cells available"
+
+
+def test_check_route_reports_incorrect_and_correct_user_cells(client):
+    client.get("/new?difficulty=easy")
+
+    original_puzzle = sudoku_logic.deep_copy(CURRENT["puzzle"])
+    board = sudoku_logic.deep_copy(CURRENT["solution"])
+
+    empty_positions = [
+        (row, col)
+        for row in range(sudoku_logic.SIZE)
+        for col in range(sudoku_logic.SIZE)
+        if original_puzzle[row][col] == sudoku_logic.EMPTY
+    ]
+    wrong_row, wrong_col = empty_positions[0]
+    board[wrong_row][wrong_col] = (board[wrong_row][wrong_col] % 9) + 1
+
+    check_response = client.post("/check", json={"board": board})
+    result = check_response.get_json()
+
+    assert result["incorrect"] == [[wrong_row, wrong_col]]
+    assert len(result["correct"]) == len(empty_positions) - 1

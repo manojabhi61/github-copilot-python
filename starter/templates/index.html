@@ -6,12 +6,42 @@
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-  <h1>Sudoku Game</h1>
-  <div id="sudoku-board"></div>
-  <div class="controls">
-    <button id="new-game">New Game</button>
-    <button id="check-solution">Check Solution</button>
-    <span id="message"></span>
+  <div class="app-shell">
+    <h1>Sudoku Game</h1>
+    <div class="controls">
+      <label for="difficulty-select">Difficulty:</label>
+      <select id="difficulty-select">
+        <option value="easy">Easy</option>
+        <option value="medium" selected>Medium</option>
+        <option value="hard">Hard</option>
+      </select>
+      <label for="player-name">Player:</label>
+      <input id="player-name" type="text" maxlength="20" placeholder="Player name" value="Player">
+      <span id="timer">Time: 00:00</span>
+      <button id="new-game">New Game</button>
+      <button id="check-solution">Check Solution</button>
+      <button id="hint-button">Hint</button>
+      <button id="theme-toggle" type="button" aria-label="Toggle dark and light mode">Dark mode</button>
+      <span id="message"></span>
+    </div>
+    <div id="sudoku-board"></div>
+    <section id="leaderboard-section" aria-label="Top 10 leaderboard">
+      <h2>Top 10 Leaderboard</h2>
+      <div class="leaderboard-table-wrapper">
+        <table id="leaderboard-table" class="leaderboard-table">
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Name</th>
+              <th>Time</th>
+              <th>Level</th>
+              <th>Hints</th>
+            </tr>
+          </thead>
+          <tbody id="leaderboard-body"></tbody>
+        </table>
+      </div>
+    </section>
   </div>
   <script src="/static/main.js"></script>
 </body>
